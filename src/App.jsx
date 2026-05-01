@@ -166,7 +166,7 @@ function HomePage({ navigate, dueCount }) {
       </div>
 
       <div style={styles.homeCards}>
-        <HomeCard icon="newspaper" title="Actualités du jour" desc="10 sujets clés avec contexte et analyse" color="#E8F4FD" accent="#2196F3" onClick={() => navigate("news")} />
+        <HomeCard icon="newspaper" title="Actualités du jour" desc="5 sujets clés avec contexte et analyse" color="#E8F4FD" accent="#2196F3" onClick={() => navigate("news")} />
         <HomeCard icon="search" title="Explorer un sujet" desc="Posez vos questions sur n'importe quel sujet" color="#F0FDF4" accent="#22C55E" onClick={() => navigate("explore")} />
         <HomeCard icon="brain" title="Quiz du jour" desc={dueCount > 0 ? `${dueCount} carte${dueCount > 1 ? "s" : ""} à réviser aujourd'hui` : "Aucune révision pour aujourd'hui"} color="#FFF7ED" accent="#F97316" badge={dueCount > 0 ? dueCount : null} onClick={() => navigate("quiz")} />
         <HomeCard icon="history" title="Historique" desc="Retrouvez vos conversations passées" color="#FAF5FF" accent="#A855F7" onClick={() => navigate("history")} />
