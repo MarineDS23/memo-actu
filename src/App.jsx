@@ -215,8 +215,8 @@ function NewsPage({ navigate }) {
     try {
       const today = new Date().toLocaleDateString("fr-FR", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
       const text = await callClaude(
-        [{ role: "user", content: `Donne-moi un résumé de l'actualité internationale du ${today} en 10 sujets majeurs. Pour chaque sujet, utilise exactement ce format:\n\n## [Titre du sujet]\n* Ce qu'il s'est passé : [2-3 phrases]\n* Contexte : [2-3 phrases de contexte historique ou géopolitique]\n* Pistes de réflexion : [1-2 questions pour approfondir]\n\nSépare chaque sujet clairement.` }],
-        "Tu es un journaliste expert en actualité internationale. Tu fournis des résumés clairs, précis et pédagogiques.",
+        [{ role: "user", content: `Donne-moi un résumé de l'actualité internationale du ${today} en 5 sujets majeurs. Pour chaque sujet, utilise ce format:\n\n## [Titre]\n* Ce qu'il s'est passé : [1-2 phrases]\n* Contexte : [1-2 phrases]\n* Pistes de réflexion : [1 question]\n\nSépare chaque sujet clairement.` }],
+        "Tu es un journaliste expert. Sois concis et précis.",
         true
       );
       const items = parseNewsItems(text);
