@@ -18,10 +18,13 @@ export async function handler(event) {
   try {
     const apiKey = event.headers["x-api-key"];
     const parsedBody = JSON.parse(event.body);
-    
-    // Retire le web search et interleaved-thinking qui causent des erreurs
     delete parsedBody.tools;
-    
+
+    // Réduit max_tokens pour accélérer la réponse
+    parsedBody.max_tokens = 500;
+    // Utilise le modèle le plus rapide
+    parsedBody.model = "claude-haiku-4-5-20251001";
+
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
