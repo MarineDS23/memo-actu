@@ -64,9 +64,9 @@ async function callClaude(messages, systemPrompt, useWebSearch = false) {
     body.tools = [{ type: "web_search_20250305", name: "web_search" }];
   }
 
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+  const res = await fetch("/.netlify/functions/claude", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-beta": "interleaved-thinking-2025-05-14" },
+    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
     body: JSON.stringify(body),
   });
   if (!res.ok) {
