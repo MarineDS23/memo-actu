@@ -8,20 +8,11 @@ const storage = {
   set: (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} },
 };
 
-const getApiKey = () => storage.get("anthropic_api_key") || "";
+const getApiKey = () => storage.get("eiffage_api_key") || "";
 const getHistory = () => storage.get("conversation_history") || [];
 const saveHistory = (h) => storage.set("conversation_history", h);
 const getFlashcards = () => storage.get("flashcards") || [];
 const saveFlashcards = (f) => storage.set("flashcards", f);
-const getTodayNews = () => {
-  const today = new Date().toDateString();
-  const stored = storage.get("today_news");
-  if (stored && stored.date === today) return stored.news;
-  return null;
-};
-const saveTodayNews = (news) => {
-  storage.set("today_news", { date: new Date().toDateString(), news });
-};
 
 // SM-2 Algorithm
 function sm2(card, quality) {
@@ -48,57 +39,33 @@ function getDueCards() {
 }
 
 // ============================================================
-// API CALL
+// API CALL - Eiffage
 // ============================================================
-async function callClaude(messages, systemPrompt, useWebSearch = false) {
+async function callEiffage(prompt) {
   const apiKey = getApiKey();
-  if (!apiKey) throw new Error("Clé API manquante");
+  if (!apiKey) throw new Error("Clé API manquante — allez dans Paramètres");
 
-  const body = {
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 1000,
-    system: systemPrompt,
-    messages,
-  };
-  if (useWebSearch) {
-    body.tools = [{ type: "web_search_20250305", name: "web_search" }];
-  }
-
-  const res = await fetch("/.netlify/functions/claude", {
+  const response = await fetch("https://api.eiffage.com/dpg/lechat/agent", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify(body),
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      request: {
+        prompt: prompt,
+        agent_config_id: 12,
+      }
+    }),
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err?.error?.message || `Erreur API ${res.status}`);
-  }
-  const data = await res.json();
-  return data.content.filter(b => b.type === "text").map(b => b.text).join("\n");
-}
 
-// ============================================================
-// PARSE NEWS
-// ============================================================
-function parseNewsItems(text) {
-  const items = [];
-  const blocks = text.split(/\n(?=#{1,2}\s|\*\*\d+[\.\)]|\d+[\.\)])/g);
-  for (const block of blocks) {
-    const lines = block.trim().split("\n").filter(Boolean);
-    if (!lines.length) continue;
-    const title = lines[0].replace(/^#+\s*/, "").replace(/^\*\*\d+[\.\)]\s*/, "").replace(/^\d+[\.\)]\s*/, "").replace(/\*\*/g, "").trim();
-    if (!title || title.length < 5) continue;
-    const body = lines.slice(1).join("\n");
-    const sections = { event: "", context: "", reflection: "" };
-    const eMatch = body.match(/ce qu['']il s['']est passé[^\n]*([\s\S]*?)(?=\*\s*contexte|##|$)/i);
-    const cMatch = body.match(/contexte[^\n]*([\s\S]*?)(?=\*\s*pistes|##|$)/i);
-    const rMatch = body.match(/pistes[^\n]*([\s\S]*?)(?=\*\s*ce qu|##|\d+\.|$)/i);
-    sections.event = eMatch ? eMatch[1].trim() : body.substring(0, 200);
-    sections.context = cMatch ? cMatch[1].trim() : "";
-    sections.reflection = rMatch ? rMatch[1].trim() : "";
-    items.push({ id: Date.now() + Math.random(), title, ...sections, raw: block });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err?.message || `Erreur API ${response.status}`);
   }
-  return items.slice(0, 10);
+
+  const data = await response.json();
+  return data.response || "";
 }
 
 // ============================================================
@@ -106,16 +73,13 @@ function parseNewsItems(text) {
 // ============================================================
 const Icon = ({ name, size = 20 }) => {
   const icons = {
-    home: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>,
-    newspaper: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 22h16a2 2 0 002-2V4a2 2 0 00-2-2H8a2 2 0 00-2 2v16a2 2 0 01-2 2zm0 0a2 2 0 01-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8M15 18h-5M10 6h8v4h-8z"/></svg>,
     search: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>,
-    brain: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9.5 2A2.5 2.5 0 0112 4.5v15a2.5 2.5 0 01-4.96-.46 2.5 2.5 0 01-1.07-4.58A3 3 0 015 11c0-.7.24-1.34.64-1.85A3 3 0 017 3.34 2.5 2.5 0 019.5 2zM14.5 2A2.5 2.5 0 0112 4.5v15a2.5 2.5 0 004.96-.46 2.5 2.5 0 001.07-4.58A3 3 0 0019 11c0-.7-.24-1.34-.64-1.85A3 3 0 0017 3.34 2.5 2.5 0 0014.5 2z"/></svg>,
+    brain: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9.5 2A2.5 2.5 0 0112 4.5v15a2.5 2.5 0 01-4.96-.46 2.5 2.5 0 01-1.07-4.58A3 3 0 015 11c0-.7.24-1.34.64-1.85A3 3 0 017 3.34 2.5 2.5 0 019.5 2zM14.5 2A2.5 2.5 0 0112 4.5v15a2.5 2.5 0 004.96-.46 2.5 2.5 0 001.07-4.58A3 3 0 0119 11c0-.7-.24-1.34-.64-1.85A3 3 0 0117 3.34 2.5 2.5 0 0114.5 2z"/></svg>,
     history: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/><polyline points="12 7 12 12 16 14"/></svg>,
     settings: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>,
     send: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>,
     save: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>,
     back: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>,
-    refresh: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>,
     check: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>,
     trash: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>,
   };
@@ -130,7 +94,6 @@ export default function App() {
   const [pageParams, setPageParams] = useState({});
 
   const navigate = (p, params = {}) => { setPage(p); setPageParams(params); };
-
   const dueCount = getDueCards().length;
 
   return (
@@ -138,15 +101,12 @@ export default function App() {
       <style>{globalCSS}</style>
       <div style={styles.content}>
         {page === "home" && <HomePage navigate={navigate} dueCount={dueCount} />}
-        {page === "news" && <NewsPage navigate={navigate} />}
         {page === "explore" && <ExplorePage navigate={navigate} params={pageParams} />}
         {page === "history" && <HistoryPage navigate={navigate} />}
         {page === "quiz" && <QuizPage navigate={navigate} />}
         {page === "settings" && <SettingsPage navigate={navigate} />}
       </div>
-      {page !== "home" && (
-        <BottomNav current={page} navigate={navigate} dueCount={dueCount} />
-      )}
+      {page !== "home" && <BottomNav current={page} navigate={navigate} dueCount={dueCount} />}
     </div>
   );
 }
@@ -166,7 +126,6 @@ function HomePage({ navigate, dueCount }) {
       </div>
 
       <div style={styles.homeCards}>
-        <HomeCard icon="newspaper" title="Actualités du jour" desc="5 sujets clés avec contexte et analyse" color="#E8F4FD" accent="#2196F3" onClick={() => navigate("news")} />
         <HomeCard icon="search" title="Explorer un sujet" desc="Posez vos questions sur n'importe quel sujet" color="#F0FDF4" accent="#22C55E" onClick={() => navigate("explore")} />
         <HomeCard icon="brain" title="Quiz du jour" desc={dueCount > 0 ? `${dueCount} carte${dueCount > 1 ? "s" : ""} à réviser aujourd'hui` : "Aucune révision pour aujourd'hui"} color="#FFF7ED" accent="#F97316" badge={dueCount > 0 ? dueCount : null} onClick={() => navigate("quiz")} />
         <HomeCard icon="history" title="Historique" desc="Retrouvez vos conversations passées" color="#FAF5FF" accent="#A855F7" onClick={() => navigate("history")} />
@@ -195,81 +154,6 @@ function HomeCard({ icon, title, desc, color, accent, badge, onClick }) {
 }
 
 // ============================================================
-// NEWS PAGE
-// ============================================================
-function NewsPage({ navigate }) {
-  const [news, setNews] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [selectedItem, setSelectedItem] = useState(null);
-
-  useEffect(() => {
-    const cached = getTodayNews();
-    if (cached) setNews(cached);
-    else fetchNews();
-  }, []);
-
-  async function fetchNews() {
-    setLoading(true);
-    setError("");
-    try {
-      const today = new Date().toLocaleDateString("fr-FR", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
-      const text = await callClaude(
-        [{ role: "user", content: `Donne-moi un résumé de l'actualité internationale du ${today} en 5 sujets majeurs. Pour chaque sujet, utilise ce format:\n\n## [Titre]\n* Ce qu'il s'est passé : [1-2 phrases]\n* Contexte : [1-2 phrases]\n* Pistes de réflexion : [1 question]\n\nSépare chaque sujet clairement.` }],
-        "Tu es un journaliste expert. Sois concis et précis.",
-        true
-      );
-      const items = parseNewsItems(text);
-      if (items.length === 0) {
-        const fallback = [{ id: 1, title: "Actualités du jour", event: text, context: "", reflection: "", raw: text }];
-        setNews(fallback);
-        saveTodayNews(fallback);
-      } else {
-        setNews(items);
-        saveTodayNews(items);
-      }
-    } catch (e) {
-      setError(e.message);
-    }
-    setLoading(false);
-  }
-
-  if (selectedItem) {
-    return <ConversationPage item={selectedItem} onBack={() => setSelectedItem(null)} context="news" />;
-  }
-
-  return (
-    <div style={styles.page}>
-      <div style={styles.pageHeader}>
-        <h1 style={styles.pageTitle}>📰 Actualités du jour</h1>
-        <span style={styles.pageDate}>{new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}</span>
-        {!loading && (
-          <button style={styles.iconBtn} onClick={fetchNews} title="Rafraîchir">
-            <Icon name="refresh" size={18} />
-          </button>
-        )}
-      </div>
-      {loading && <LoadingState text="Recherche des actualités du jour..." />}
-      {error && <ErrorState msg={error} onRetry={fetchNews} />}
-      {news && !loading && (
-        <div style={styles.newsList}>
-          {news.map((item, i) => (
-            <button key={item.id} style={styles.newsCard} className="newsCard" onClick={() => setSelectedItem(item)}>
-              <span style={styles.newsNum}>{i + 1}</span>
-              <div style={styles.newsContent}>
-                <div style={styles.newsTitle}>{item.title}</div>
-                {item.event && <div style={styles.newsPreview}>{item.event.substring(0, 100)}…</div>}
-              </div>
-              <span style={styles.chevron}>›</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ============================================================
 // EXPLORE PAGE
 // ============================================================
 function ExplorePage({ navigate, params }) {
@@ -284,11 +168,8 @@ function ExplorePage({ navigate, params }) {
     setLoading(true);
     setError("");
     try {
-      const text = await callClaude(
-        [{ role: "user", content: `Explique-moi le sujet suivant : "${query}"\n\nUtilise ce format :\n\n## ${query}\n* Ce qu'il s'est passé : [les faits essentiels]\n* Contexte : [contexte historique, géopolitique ou économique pour comprendre]\n* Pistes de réflexion : [2-3 questions pour approfondir]` }],
-        "Tu es un expert polyvalent capable d'expliquer n'importe quel sujet d'actualité de façon claire, contextuelle et pédagogique.",
-        true
-      );
+      const prompt = `Explique-moi le sujet suivant : "${query}"\n\nUtilise ce format :\n\n## ${query}\n* Ce qu'il s'est passé : [les faits essentiels]\n* Contexte : [contexte historique, géopolitique ou économique pour comprendre]\n* Pistes de réflexion : [2-3 questions pour approfondir]`;
+      const text = await callEiffage(prompt);
       setItem({ id: Date.now(), title: query, raw: text, event: text, context: "", reflection: "" });
       setStarted(true);
     } catch (e) {
@@ -311,7 +192,7 @@ function ExplorePage({ navigate, params }) {
         <div style={styles.exploreInputRow}>
           <input
             style={styles.exploreInput}
-            placeholder="Ex: Condamnation de YouTube, tensions en mer de Chine..."
+            placeholder="Ex: Tensions commerciales USA/Chine, IA et emploi..."
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={e => e.key === "Enter" && startExploration()}
@@ -320,7 +201,7 @@ function ExplorePage({ navigate, params }) {
             <Icon name="send" size={18} />
           </button>
         </div>
-        {error && <ErrorState msg={error} onRetry={startExploration} />}
+        {error && <ErrorState msg={error} />}
         {loading && <LoadingState text={`Analyse de "${query}"…`} />}
       </div>
       <div style={styles.suggestionsTitle}>Suggestions</div>
@@ -356,12 +237,9 @@ function ConversationPage({ item, onBack, context }) {
     setInput("");
     setLoading(true);
     try {
-      const apiMessages = [
-        { role: "user", content: `Contexte du sujet : ${item.title}\n\n${item.raw || item.event}` },
-        { role: "assistant", content: "Je comprends ce sujet. Posez vos questions, je suis là pour approfondir." },
-        ...newMessages,
-      ];
-      const reply = await callClaude(apiMessages, "Tu es un expert pédagogue. Réponds de façon claire, précise et structurée aux questions sur l'actualité. Reste dans le contexte du sujet abordé.");
+      const conversationContext = messages.map(m => `${m.role === "user" ? "Question" : "Réponse"}: ${m.content}`).join("\n");
+      const prompt = `Sujet : ${item.title}\n\nContexte du sujet :\n${item.raw || item.event}\n\n${conversationContext ? `Conversation précédente :\n${conversationContext}\n\n` : ""}Question : ${input}`;
+      const reply = await callEiffage(prompt);
       setMessages([...newMessages, { role: "assistant", content: reply }]);
     } catch (e) {
       setMessages([...newMessages, { role: "assistant", content: `Erreur : ${e.message}` }]);
@@ -371,14 +249,12 @@ function ConversationPage({ item, onBack, context }) {
 
   function saveForQuiz() {
     const cards = getFlashcards();
-    const conv = messages.filter(m => m.role === "user").map(m => m.content);
     const newCards = [{
       id: Date.now(),
       subject: item.title,
       question: `Que s'est-il passé concernant : ${item.title} ?`,
       answer: item.event || item.raw,
       context: item.context,
-      conversation: conv,
       createdAt: new Date().toISOString(),
       repetitions: 0,
       easeFactor: 2.5,
@@ -421,7 +297,7 @@ function ConversationPage({ item, onBack, context }) {
           <div style={styles.chatArea}>
             <div style={styles.chatDivider}>— Votre conversation —</div>
             {messages.map((m, i) => (
-              <div key={i} style={{ ...styles.bubble, alignSelf: m.role === "user" ? "flex-end" : "flex-start", background: m.role === "user" ? "#2196F3" : "#F3F4F6", color: m.role === "user" ? "#fff" : "#1a1a2e" }}>
+              <div key={i} style={{ ...styles.bubble, alignSelf: m.role === "user" ? "flex-end" : "flex-start", background: m.role === "user" ? "#22C55E" : "#F3F4F6", color: m.role === "user" ? "#fff" : "#1a1a2e" }}>
                 {m.content}
               </div>
             ))}
@@ -492,7 +368,6 @@ function HistoryPage({ navigate }) {
               <div style={styles.historyTitle}>{item.title}</div>
               <div style={styles.historyMeta}>
                 {new Date(item.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" })}
-                {" · "}{item.context === "news" ? "Actualités" : "Exploration"}
               </div>
             </div>
             <button style={styles.deleteBtn} onClick={() => deleteItem(item.id)}>
@@ -509,7 +384,7 @@ function HistoryPage({ navigate }) {
 // QUIZ PAGE
 // ============================================================
 function QuizPage({ navigate }) {
-  const [dueCards, setDueCards] = useState(getDueCards());
+  const [dueCards] = useState(getDueCards());
   const [current, setCurrent] = useState(0);
   const [revealed, setRevealed] = useState(false);
   const [done, setDone] = useState(false);
@@ -595,7 +470,7 @@ function SettingsPage({ navigate }) {
   const [saved, setSaved] = useState(false);
 
   function save() {
-    storage.set("anthropic_api_key", key.trim());
+    storage.set("eiffage_api_key", key.trim());
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   }
@@ -603,7 +478,7 @@ function SettingsPage({ navigate }) {
   function clearData() {
     if (window.confirm("Effacer tout l'historique et les flashcards ?")) {
       localStorage.clear();
-      storage.set("anthropic_api_key", key.trim());
+      storage.set("eiffage_api_key", key.trim());
     }
   }
 
@@ -611,9 +486,8 @@ function SettingsPage({ navigate }) {
     <div style={styles.page}>
       <div style={styles.pageHeader}><h1 style={styles.pageTitle}>⚙️ Paramètres</h1></div>
       <div style={styles.settingsSection}>
-        <label style={styles.settingsLabel}>Clé API Anthropic</label>
-        <input style={styles.settingsInput} type="password" placeholder="sk-ant-..." value={key} onChange={e => setKey(e.target.value)} />
-        <p style={styles.settingsHint}>Obtenez votre clé sur <a href="https://console.anthropic.com" target="_blank" style={{ color: "#2196F3" }}>console.anthropic.com</a></p>
+        <label style={styles.settingsLabel}>Clé API</label>
+        <input style={styles.settingsInput} type="password" placeholder="Votre clé API..." value={key} onChange={e => setKey(e.target.value)} />
         <button style={styles.saveSettingsBtn} onClick={save}>
           {saved ? <><Icon name="check" size={16} /> Sauvegardé</> : "Sauvegarder la clé"}
         </button>
@@ -627,7 +501,7 @@ function SettingsPage({ navigate }) {
       </div>
       <div style={styles.settingsSection}>
         <label style={styles.settingsLabel}>À propos</label>
-        <p style={styles.settingsHint}>mémoActu v1.0 — PWA propulsée par Claude (Anthropic)<br />Algorithme de mémorisation : SM-2</p>
+        <p style={styles.settingsHint}>mémoActu v2.0 — Algorithme de mémorisation : SM-2</p>
       </div>
     </div>
   );
@@ -638,7 +512,6 @@ function SettingsPage({ navigate }) {
 // ============================================================
 function BottomNav({ current, navigate, dueCount }) {
   const tabs = [
-    { id: "news", icon: "newspaper", label: "Actu" },
     { id: "explore", icon: "search", label: "Explorer" },
     { id: "quiz", icon: "brain", label: "Quiz", badge: dueCount },
     { id: "history", icon: "history", label: "Historique" },
@@ -647,7 +520,7 @@ function BottomNav({ current, navigate, dueCount }) {
   return (
     <nav style={styles.bottomNav}>
       {tabs.map(t => (
-        <button key={t.id} style={{ ...styles.navBtn, color: current === t.id ? "#2196F3" : "#9CA3AF" }} onClick={() => navigate(t.id)}>
+        <button key={t.id} style={{ ...styles.navBtn, color: current === t.id ? "#22C55E" : "#9CA3AF" }} onClick={() => navigate(t.id)}>
           <div style={{ position: "relative" }}>
             <Icon name={t.icon} size={22} />
             {t.badge > 0 && <span style={{ ...styles.badge, background: "#F97316", top: -4, right: -4 }}>{t.badge}</span>}
@@ -671,12 +544,11 @@ function LoadingState({ text }) {
   );
 }
 
-function ErrorState({ msg, onRetry }) {
+function ErrorState({ msg }) {
   return (
     <div style={styles.error}>
       <p style={{ color: "#EF4444", fontWeight: 600 }}>Erreur</p>
       <p style={{ fontSize: 13, color: "#666" }}>{msg}</p>
-      {onRetry && <button style={styles.retryBtn} onClick={onRetry}>Réessayer</button>}
     </div>
   );
 }
@@ -691,7 +563,7 @@ const styles = {
   homeHeader: { textAlign: "center", paddingBottom: 8 },
   homeLogoRow: { display: "flex", justifyContent: "center", alignItems: "baseline", gap: 2 },
   homeLogo: { fontSize: 36, fontWeight: 900, color: "#1a1a2e", letterSpacing: -1 },
-  homeLogoAccent: { fontSize: 36, fontWeight: 900, color: "#2196F3", letterSpacing: -1 },
+  homeLogoAccent: { fontSize: 36, fontWeight: 900, color: "#22C55E", letterSpacing: -1 },
   homeTagline: { color: "#888", fontSize: 14, marginTop: 6 },
   homeCards: { display: "flex", flexDirection: "column", gap: 12 },
   homeCard: { display: "flex", alignItems: "center", gap: 16, padding: "16px 18px", borderRadius: 14, border: "none", cursor: "pointer", textAlign: "left", transition: "transform .15s, box-shadow .15s", boxShadow: "0 2px 8px rgba(0,0,0,.06)" },
@@ -702,22 +574,13 @@ const styles = {
   page: { padding: "20px 16px", display: "flex", flexDirection: "column", gap: 16, minHeight: "100vh" },
   pageHeader: { display: "flex", alignItems: "center", gap: 10, paddingBottom: 4 },
   pageTitle: { fontSize: 22, fontWeight: 800, color: "#1a1a2e", margin: 0, flex: 1 },
-  pageDate: { fontSize: 12, color: "#aaa" },
-  iconBtn: { background: "none", border: "none", cursor: "pointer", color: "#666", padding: 6 },
-  newsList: { display: "flex", flexDirection: "column", gap: 10 },
-  newsCard: { display: "flex", alignItems: "center", gap: 12, background: "#fff", border: "1px solid #ECECEC", borderRadius: 12, padding: "14px 16px", cursor: "pointer", textAlign: "left", boxShadow: "0 1px 4px rgba(0,0,0,.04)" },
-  newsNum: { fontWeight: 800, fontSize: 18, color: "#2196F3", minWidth: 24 },
-  newsContent: { flex: 1 },
-  newsTitle: { fontWeight: 700, fontSize: 15, color: "#1a1a2e", marginBottom: 3 },
-  newsPreview: { fontSize: 12, color: "#888", lineHeight: 1.4 },
-  chevron: { color: "#ccc", fontSize: 22 },
   exploreBox: { background: "#fff", borderRadius: 14, padding: 20, boxShadow: "0 2px 12px rgba(0,0,0,.06)" },
   exploreHint: { fontSize: 15, color: "#444", marginBottom: 14, fontWeight: 600 },
   exploreInputRow: { display: "flex", gap: 10 },
   exploreInput: { flex: 1, border: "1.5px solid #E5E7EB", borderRadius: 10, padding: "12px 14px", fontSize: 14, outline: "none", fontFamily: "inherit" },
   suggestionsTitle: { fontSize: 13, fontWeight: 700, color: "#888", textTransform: "uppercase", letterSpacing: 1 },
   suggestions: { display: "flex", flexWrap: "wrap", gap: 8 },
-  suggestionChip: { background: "#EFF6FF", color: "#2563EB", border: "none", borderRadius: 20, padding: "8px 14px", fontSize: 13, cursor: "pointer" },
+  suggestionChip: { background: "#F0FDF4", color: "#16A34A", border: "none", borderRadius: 20, padding: "8px 14px", fontSize: 13, cursor: "pointer" },
   convPage: { display: "flex", flexDirection: "column", height: "100vh", background: "#FAFAFA" },
   convHeader: { display: "flex", alignItems: "center", gap: 12, padding: "16px 16px 12px", background: "#fff", borderBottom: "1px solid #ECECEC", position: "sticky", top: 0, zIndex: 10 },
   backBtn: { background: "none", border: "none", cursor: "pointer", color: "#333", padding: 4 },
@@ -733,8 +596,8 @@ const styles = {
   convFooter: { position: "fixed", bottom: 0, left: 0, right: 0, maxWidth: 480, margin: "0 auto", background: "#fff", borderTop: "1px solid #ECECEC", padding: "10px 14px 20px", display: "flex", flexDirection: "column", gap: 8 },
   inputRow: { display: "flex", gap: 8 },
   chatInput: { flex: 1, border: "1.5px solid #E5E7EB", borderRadius: 24, padding: "10px 16px", fontSize: 14, outline: "none", fontFamily: "inherit" },
-  sendBtn: { background: "#2196F3", color: "#fff", border: "none", borderRadius: 24, padding: "10px 14px", cursor: "pointer", display: "flex", alignItems: "center" },
-  saveBtn: { display: "flex", alignItems: "center", gap: 6, background: "#EFF6FF", color: "#2563EB", border: "1px solid #BFDBFE", borderRadius: 20, padding: "8px 16px", fontSize: 13, cursor: "pointer", fontWeight: 600, alignSelf: "flex-start" },
+  sendBtn: { background: "#22C55E", color: "#fff", border: "none", borderRadius: 24, padding: "10px 14px", cursor: "pointer", display: "flex", alignItems: "center" },
+  saveBtn: { display: "flex", alignItems: "center", gap: 6, background: "#F0FDF4", color: "#16A34A", border: "1px solid #BBF7D0", borderRadius: 20, padding: "8px 16px", fontSize: 13, cursor: "pointer", fontWeight: 600, alignSelf: "flex-start" },
   savedBadge: { display: "flex", alignItems: "center", gap: 6, color: "#22C55E", fontSize: 13, fontWeight: 700 },
   historyList: { display: "flex", flexDirection: "column", gap: 10 },
   historyCard: { display: "flex", alignItems: "center", gap: 12, background: "#fff", borderRadius: 12, padding: "14px 16px", border: "1px solid #ECECEC" },
@@ -745,9 +608,9 @@ const styles = {
   deleteBtn: { background: "none", border: "none", cursor: "pointer", color: "#ccc", padding: 4 },
   quizProgress: { fontSize: 13, color: "#888", fontWeight: 700 },
   progressBar: { background: "#E5E7EB", borderRadius: 4, height: 6, overflow: "hidden" },
-  progressFill: { background: "#2196F3", height: "100%", borderRadius: 4, transition: "width .4s ease" },
+  progressFill: { background: "#22C55E", height: "100%", borderRadius: 4, transition: "width .4s ease" },
   quizCard: { background: "#fff", borderRadius: 16, padding: 24, boxShadow: "0 4px 20px rgba(0,0,0,.08)", display: "flex", flexDirection: "column", gap: 16 },
-  quizSubject: { fontSize: 12, fontWeight: 700, color: "#2196F3", textTransform: "uppercase", letterSpacing: 1 },
+  quizSubject: { fontSize: 12, fontWeight: 700, color: "#22C55E", textTransform: "uppercase", letterSpacing: 1 },
   quizQuestion: { fontSize: 18, fontWeight: 700, color: "#1a1a2e", lineHeight: 1.5 },
   revealBtn: { background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 10, padding: "14px", fontSize: 15, fontWeight: 700, cursor: "pointer" },
   quizAnswer: { display: "flex", flexDirection: "column", gap: 16 },
@@ -760,12 +623,11 @@ const styles = {
   settingsLabel: { fontWeight: 800, fontSize: 15, color: "#1a1a2e" },
   settingsInput: { border: "1.5px solid #E5E7EB", borderRadius: 10, padding: "12px 14px", fontSize: 14, outline: "none", fontFamily: "inherit" },
   settingsHint: { fontSize: 13, color: "#888", lineHeight: 1.6 },
-  saveSettingsBtn: { background: "#EFF6FF", color: "#2563EB", border: "1px solid #BFDBFE", borderRadius: 10, padding: "12px", fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 },
+  saveSettingsBtn: { background: "#F0FDF4", color: "#16A34A", border: "1px solid #BBF7D0", borderRadius: 10, padding: "12px", fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 },
   badge: { position: "absolute", top: -6, right: -6, minWidth: 18, height: 18, borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, color: "#fff", padding: "0 4px" },
   loading: { display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 40 },
-  spinner: { width: 32, height: 32, border: "3px solid #E5E7EB", borderTop: "3px solid #2196F3", borderRadius: "50%" },
+  spinner: { width: 32, height: 32, border: "3px solid #E5E7EB", borderTop: "3px solid #22C55E", borderRadius: "50%" },
   error: { background: "#FEF2F2", borderRadius: 12, padding: 16, display: "flex", flexDirection: "column", gap: 6 },
-  retryBtn: { background: "#EF4444", color: "#fff", border: "none", borderRadius: 8, padding: "10px", cursor: "pointer", fontWeight: 700 },
   empty: { textAlign: "center", padding: "60px 20px", color: "#666" },
   bottomNav: { position: "fixed", bottom: 0, left: 0, right: 0, maxWidth: 480, margin: "0 auto", background: "#fff", borderTop: "1px solid #ECECEC", display: "flex", padding: "8px 0 12px", zIndex: 100 },
   navBtn: { flex: 1, background: "none", border: "none", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 4, position: "relative" },
@@ -776,7 +638,6 @@ const globalCSS = `
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
   body { background: #F1F5F9; }
   .homeCard:active { transform: scale(0.97); }
-  .newsCard:active { transform: scale(0.98); }
   .spinner { animation: spin 0.8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   input, button, textarea { font-family: inherit; }
